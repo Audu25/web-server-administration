@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Node.js App - Nginx Reverse Proxy</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <nav>
+      <div class="logo">NodeApp</div>
+      <ul>
+        <li><a href="/">Home</a></li>
+        <li><a href="/api/status">API Status</a></li>
+        <li><a href="/api/info">Server Info</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero nodejs">
+      <h1>Node.js + Nginx</h1>
+      <p>Node.js application served through Nginx reverse proxy</p>
+      <span class="badge nodejs-badge">Proxied via Nginx</span>
+    </section>
+
+    <section class="cards">
+      <div class="card">
+        <h2>Node.js</h2>
+        <p>Express.js backend running on port 3000, handling API requests and serving content.</p>
+      </div>
+      <div class="card">
+        <h2>Nginx Proxy</h2>
+        <p>Nginx listens on port 80/443 and forwards requests to the Node.js application.</p>
+      </div>
+      <div class="card">
+        <h2>Benefits</h2>
+        <p>SSL termination, load balancing, static file caching, and security headers via Nginx.</p>
+      </div>
+    </section>
+
+    <section class="api-demo">
+      <h2>Live API Endpoints</h2>
+      <div class="endpoint">
+        <code>GET /api/status</code>
+        <button onclick="fetchApi('/api/status')">Test</button>
+        <pre id="status-output"></pre>
+      </div>
+      <div class="endpoint">
+        <code>GET /api/info</code>
+        <button onclick="fetchApi('/api/info')">Test</button>
+        <pre id="info-output"></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>&copy; 2026 DevOps Web Server Administration Project &mdash; Node.js + Nginx</p>
+  </footer>
+
+  <script>
+    async function fetchApi(path) {
+      try {
+        const res = await fetch(path);
+        const data = await res.json();
+        const key = path.includes('status') ? 'status-output' : 'info-output';
+        document.getElementById(key).textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>
