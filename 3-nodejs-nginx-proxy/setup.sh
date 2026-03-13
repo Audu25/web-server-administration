@@ -7,27 +7,45 @@ set -e
 DOMAIN="nodeapp.local"
 APP_SRC="$(pwd)/app"
 APP_DEST="/var/www/nodeapp"
-NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
 NODE_SERVICE="/etc/systemd/system/nodeapp.service"
+
+# Detect OS
+if [ -f /etc/debian_version ]; then
+    PKG_MANAGER="apt"
+    WEB_USER="www-data"
+    NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
+    USE_SITES_ENABLED=true
+else
+    PKG_MANAGER="yum"
+    WEB_USER="nginx"
+    NGINX_CONF="/etc/nginx/conf.d/$DOMAIN.conf"
+    USE_SITES_ENABLED=false
+fi
 
 echo "=============================================="
 echo " Node.js + Nginx Reverse Proxy Setup"
 echo " Domain: $DOMAIN"
 echo "=============================================="
 
-# 1. Install Node.js (via NodeSource) and Nginx
+# 1. Install Node.js and Nginx
 echo "[1/5] Installing Node.js and Nginx..."
-sudo apt update -y
 
-# Install Node.js 20.x
 if ! command -v node &>/dev/null; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-    sudo apt install -y nodejs
+    if [ "$PKG_MANAGER" = "apt" ]; then
+        sudo apt update -y
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+        sudo apt install -y nodejs
+    else
+        sudo yum install -y nodejs npm
+    fi
 fi
 
-# Install Nginx
 if ! command -v nginx &>/dev/null; then
-    sudo apt install -y nginx
+    if [ "$PKG_MANAGER" = "apt" ]; then
+        sudo apt install -y nginx
+    else
+        sudo yum install -y nginx
+    fi
 fi
 
 echo "  Node.js version: $(node -v)"
@@ -37,7 +55,7 @@ echo "  Nginx version:   $(nginx -v 2>&1)"
 echo "[2/5] Deploying application..."
 sudo mkdir -p "$APP_DEST"
 sudo cp -r "$APP_SRC"/* "$APP_DEST/"
-sudo chown -R www-data:www-data "$APP_DEST"
+sudo chown -R $WEB_USER:$WEB_USER "$APP_DEST"
 
 # Install Node.js dependencies
 cd "$APP_DEST"
@@ -46,6 +64,7 @@ cd -
 
 # 3. Create systemd service to keep Node.js running
 echo "[3/5] Creating systemd service..."
+NODE_BIN=$(which node)
 sudo bash -c "cat > $NODE_SERVICE" <<EOF
 [Unit]
 Description=Node.js Application - $DOMAIN
@@ -53,9 +72,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
+User=$WEB_USER
 WorkingDirectory=$APP_DEST
-ExecStart=/usr/bin/node $APP_DEST/server.js
+ExecStart=$NODE_BIN $APP_DEST/server.js
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
@@ -72,22 +91,54 @@ echo "  Node.js service status: $(systemctl is-active nodeapp)"
 
 # 4. Configure Nginx reverse proxy
 echo "[4/5] Configuring Nginx..."
-sudo cp nginx/nodeapp.conf "$NGINX_CONF"
+sudo bash -c "cat > $NGINX_CONF" <<'NGINXEOF'
+upstream nodejs_backend {
+    server 127.0.0.1:3000;
+}
 
-# Enable site
-sudo ln -sf "$NGINX_CONF" "/etc/nginx/sites-enabled/$DOMAIN"
-# Disable default Nginx site
-sudo rm -f /etc/nginx/sites-enabled/default
+server {
+    listen 80;
+    server_name nodeapp.local www.nodeapp.local;
 
-# Add domain to /etc/hosts for local testing
+    access_log /var/log/nginx/nodeapp.local_access.log;
+    error_log  /var/log/nginx/nodeapp.local_error.log;
+
+    location ~* \.(html|css|js|ico|png|jpg|jpeg|gif|svg|woff|woff2|ttf)$ {
+        root /var/www/nodeapp/public;
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+
+    location / {
+        proxy_pass http://nodejs_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout    60s;
+        proxy_read_timeout    60s;
+    }
+}
+NGINXEOF
+
+if [ "$USE_SITES_ENABLED" = true ]; then
+    sudo ln -sf "$NGINX_CONF" "/etc/nginx/sites-enabled/$DOMAIN"
+    sudo rm -f /etc/nginx/sites-enabled/default
+fi
+
+# Add domain to /etc/hosts
 if ! grep -q "$DOMAIN" /etc/hosts; then
     echo "127.0.0.1   $DOMAIN www.$DOMAIN" | sudo tee -a /etc/hosts
 fi
 
-# Test config and reload Nginx
+# Test config and start Nginx
 sudo nginx -t
 sudo systemctl enable nginx
-sudo systemctl reload nginx
+sudo systemctl restart nginx
 
 # 5. Summary
 echo ""
